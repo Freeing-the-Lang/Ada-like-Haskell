@@ -1,0 +1,106 @@
+name: "Ada-like-Haskell — 3OS Build + ProofLedger + Clean Release"
+
+on:
+  push:
+    branches: [ main ]
+    tags-ignore: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ada-like-haskell-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-3os:
+    name: "Build — ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      # -----------------------------
+      # CHECKOUT
+      # -----------------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------
+      # SETUP HASKELL
+      # -----------------------------
+      - name: Setup Haskell (GHC + Cabal)
+        uses: haskell/actions/setup@v2
+        with:
+          ghc-version: "9.4.8"
+          cabal-version: "3.10.1.0"
+
+      # -----------------------------
+      # BUILD SRC
+      # -----------------------------
+      - name: Build Project
+        run: |
+          mkdir -p dist
+          ghc src/Main.hs -o dist/adalike-haskell
+
+      # -----------------------------
+      # GENERATE PROOF LEDGER
+      # -----------------------------
+      - name: Generate ProofLedger
+        run: |
+          echo "Repository: Ada-like-Haskell" > proofledger-${{ matrix.os }}.txt
+          echo "Commit: $GITHUB_SHA" >> proofledger-${{ matrix.os }}.txt
+          echo "Branch: $GITHUB_REF_NAME" >> proofledger-${{ matrix.os }}.txt
+          echo "OS: ${{ matrix.os }}" >> proofledger-${{ matrix.os }}.txt
+          echo "Build Time: $(date)" >> proofledger-${{ matrix.os }}.txt
+          echo "-----------------------------" >> proofledger-${{ matrix.os }}.txt
+
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            certutil -hashfile dist/adalike-haskell SHA256 >> proofledger-${{ matrix.os }}.txt
+          else
+            sha256sum dist/adalike-haskell >> proofledger-${{ matrix.os }}.txt
+          fi
+
+      # -----------------------------
+      # UPLOAD ARTIFACTS
+      # -----------------------------
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ada-like-haskell-${{ matrix.os }}
+          path: |
+            dist/**
+            proofledger-${{ matrix.os }}.txt
+
+
+  # -------------------------------------
+  # MERGE ALL ARTIFACTS INTO ONE ZIP
+  # -------------------------------------
+  merge:
+    name: "Merge All OS Artifacts"
+    needs: [build-3os]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: merged
+
+      - name: Create Final Bundle
+        run: |
+          cd merged
+          zip -r ada-like-haskell-allos.zip .
+
+      - name: Upload Final Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ada-like-haskell-release-bundle
+          path: merged/ada-like-haskell-allos.zip
